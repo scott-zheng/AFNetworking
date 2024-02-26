@@ -154,6 +154,8 @@ typedef void (^AFURLSessionTaskCompletionHandler)(NSURLResponse *response, id re
 #pragma mark - NSProgress Tracking
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary<NSString *,id> *)change context:(void *)context {
+    // 通过KVC变化通知调用block
+    // 各个网络delegate方法回调时，都通过改变NSProgress totalUnitCount和completedUnitCount来收口逻辑，统一调用block，避免把block逻辑散落在各个delegate方法中
    if ([object isEqual:self.downloadProgress]) {
         if (self.downloadProgressBlock) {
             self.downloadProgressBlock(object);
@@ -277,6 +279,7 @@ totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend{
 
 #pragma mark - NSURLSessionDownloadDelegate
 
+// 该delegate方法定时通知URLSession的下载进度
 - (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask
       didWriteData:(int64_t)bytesWritten
  totalBytesWritten:(int64_t)totalBytesWritten
@@ -484,12 +487,14 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
         return nil;
     }
 
+    // 初始化会话配置
     if (!configuration) {
         configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
     }
 
     self.sessionConfiguration = configuration;
 
+    // 初始化delegate queue. An operation queue for scheduling the delegate calls and completion handlers.
     self.operationQueue = [[NSOperationQueue alloc] init];
     self.operationQueue.maxConcurrentOperationCount = 1;
 
@@ -506,7 +511,10 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     self.lock = [[NSLock alloc] init];
     self.lock.name = AFURLSessionManagerLockName;
 
+    // 获取会话中所有task，一个session中会有多个task。
+    // 问题：为什么初始化阶段会有task？什么极端情况会导致？
     [self.session getTasksWithCompletionHandler:^(NSArray *dataTasks, NSArray *uploadTasks, NSArray *downloadTasks) {
+        // 给所有已存在的task设置delegate。应该是属于防御性代码
         for (NSURLSessionDataTask *task in dataTasks) {
             [self addDelegateForDataTask:task uploadProgress:nil downloadProgress:nil completionHandler:nil];
         }
@@ -581,6 +589,7 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     return delegate;
 }
 
+// map {taskIdentifier => delegate}
 - (void)setDelegate:(AFURLSessionManagerTaskDelegate *)delegate
             forTask:(NSURLSessionTask *)task
 {
@@ -593,17 +602,21 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     [self.lock unlock];
 }
 
+// 给dataTask设置delegate，处理网络delegate回调方法
 - (void)addDelegateForDataTask:(NSURLSessionDataTask *)dataTask
                 uploadProgress:(nullable void (^)(NSProgress *uploadProgress)) uploadProgressBlock
               downloadProgress:(nullable void (^)(NSProgress *downloadProgress)) downloadProgressBlock
              completionHandler:(void (^)(NSURLResponse *response, id responseObject, NSError *error))completionHandler
 {
+    // 初始化delegate
     AFURLSessionManagerTaskDelegate *delegate = [[AFURLSessionManagerTaskDelegate alloc] initWithTask:dataTask];
+
+    // delegate持有manager 弱引用
     delegate.manager = self;
-    delegate.completionHandler = completionHandler;
+    delegate.completionHandler = completionHandler; // dataTask完成的回调handler
 
     dataTask.taskDescription = self.taskDescriptionForSessionTasks;
-    [self setDelegate:delegate forTask:dataTask];
+    [self setDelegate:delegate forTask:dataTask]; // 记录task => delegate的映射关系
 
     delegate.uploadProgressBlock = uploadProgressBlock;
     delegate.downloadProgressBlock = downloadProgressBlock;

@@ -303,6 +303,7 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
 #pragma mark -
 
 - (NSDictionary *)HTTPRequestHeaders {
+    // 读写锁 - 同步读，读完再退出
     NSDictionary __block *value;
     dispatch_sync(self.requestHeaderModificationQueue, ^{
         value = [NSDictionary dictionaryWithDictionary:self.mutableHTTPRequestHeaders];
@@ -313,6 +314,8 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
 - (void)setValue:(NSString *)value
 forHTTPHeaderField:(NSString *)field
 {
+    // 读写锁 - 同步栅栏写，确保之前的所有读写都完成了，才能开始写
+    // 理论上可以异步写，不需要写完才返回
     dispatch_barrier_sync(self.requestHeaderModificationQueue, ^{
         [self.mutableHTTPRequestHeaders setValue:value forKey:field];
     });
@@ -368,6 +371,7 @@ forHTTPHeaderField:(NSString *)field
     NSMutableURLRequest *mutableRequest = [[NSMutableURLRequest alloc] initWithURL:url];
     mutableRequest.HTTPMethod = method;
 
+    // 同步当前RequestSerializer实例非null的属性到请求request实例中
     for (NSString *keyPath in self.mutableObservedChangedKeyPaths) {
         [mutableRequest setValue:[self valueForKeyPath:keyPath] forKey:keyPath];
     }
@@ -470,6 +474,7 @@ forHTTPHeaderField:(NSString *)field
 
 #pragma mark - AFURLRequestSerialization
 
+// 把参数parameters添加到request中
 - (NSURLRequest *)requestBySerializingRequest:(NSURLRequest *)request
                                withParameters:(id)parameters
                                         error:(NSError *__autoreleasing *)error
@@ -477,7 +482,8 @@ forHTTPHeaderField:(NSString *)field
     NSParameterAssert(request);
 
     NSMutableURLRequest *mutableRequest = [request mutableCopy];
-
+    
+    // 请求头添加到
     [self.HTTPRequestHeaders enumerateKeysAndObjectsUsingBlock:^(id field, id value, BOOL * __unused stop) {
         if (![request valueForHTTPHeaderField:field]) {
             [mutableRequest setValue:value forHTTPHeaderField:field];
@@ -540,6 +546,14 @@ forHTTPHeaderField:(NSString *)field
                        context:(void *)context
 {
     if (context == AFHTTPRequestSerializerObserverContext) {
+        // 监听到 当前类的某些属性变化了，则记录进mutableObservedChangedKeyPaths;
+        // 也就是确保了，当前类任何有值的属性，都会在创建新的请求实例时被同步到请求实例上
+        // 这么写的好处？？为什么不直接在 创建请求实例 时，对当前类的每个属性做null校验，然后添加到请求上？
+        // 1. 解耦：请求创建与属性校验解耦，写在创建的地方比较繁杂。（比较牵强，我觉得不是主要目的）
+        // 2. 性能优化：
+        //      每次创建请求都去做每个属性的null校验，性能消耗大。
+        //      属性变化就主动通知当前类，并记录下来，创建请求时直接读取，性能消耗小。（空间换时间，我觉得是主要目的）
+        // 3. 其他？？
         if ([change[NSKeyValueChangeNewKey] isEqual:[NSNull null]]) {
             [self.mutableObservedChangedKeyPaths removeObject:keyPath];
         } else {
