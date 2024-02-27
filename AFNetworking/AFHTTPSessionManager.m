@@ -117,6 +117,15 @@
 
 #pragma mark -
 
+/* Sets a task-specific delegate. Methods not implemented on this delegate will
+ * still be forwarded to the session delegate.
+ *
+ * Cannot be modified after task resumes. Not supported on background session.
+ *
+ * Delegate is strongly referenced until the task completes, after which it is
+ * reset to `nil`.
+ */
+
 - (NSURLSessionDataTask *)GET:(NSString *)URLString
                    parameters:(nullable id)parameters
                       headers:(nullable NSDictionary <NSString *, NSString *> *)headers

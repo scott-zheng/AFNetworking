@@ -953,6 +953,19 @@ didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
     }
 }
 
+
+// NSURLSessionTaskDelegate/NSURLSessionDataDelegate/NSURLSessionDownloadDelegate
+// 这三个task级别的delegate，如果task没有自己指定delegate，就会找session的delegate
+// 所以，框架中所有task都没有自己的delegate，都会走到session的delegate回调中
+
+/* Sets a task-specific delegate. Methods not implemented on this delegate will
+ * still be forwarded to the session delegate.
+ *
+ * Cannot be modified after task resumes. Not supported on background session.
+ *
+ * Delegate is strongly referenced until the task completes, after which it is
+ * reset to `nil`.
+ */
 #pragma mark - NSURLSessionTaskDelegate
 
 - (void)URLSession:(NSURLSession *)session
@@ -1075,6 +1088,9 @@ totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend
             totalUnitCount = (int64_t) [contentLength longLongValue];
         }
     }
+    
+    // 框架中所有task都没有自己的delegate，所有都会先走到session的delegate回调中
+    // 再通过mutableTaskDelegatesKeyedByTaskIdentifier字典找到task对应AFURLSessionManagerTaskDelegate给task做delegate回调处理
     
     AFURLSessionManagerTaskDelegate *delegate = [self delegateForTask:task];
     
