@@ -306,7 +306,7 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
 #pragma mark -
 
 - (NSDictionary *)HTTPRequestHeaders {
-    // 读写锁 - 同步读，读完再退出
+    // 多读单写 - 同步读，读完再退出
     NSDictionary __block *value;
     dispatch_sync(self.requestHeaderModificationQueue, ^{
         value = [NSDictionary dictionaryWithDictionary:self.mutableHTTPRequestHeaders];
@@ -317,8 +317,8 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
 - (void)setValue:(NSString *)value
 forHTTPHeaderField:(NSString *)field
 {
-    // 读写锁 - 同步栅栏写，确保之前的所有读写都完成了，才能开始写
-    // 理论上可以异步写，不需要写完才返回
+    // 多读单写 - 同步栅栏写，确保之前的所有读写都完成了，才能开始写
+    // 理论上可以异步栅栏写，不需要写完才返回，不知道为什么这里用了同步栅栏
     dispatch_barrier_sync(self.requestHeaderModificationQueue, ^{
         [self.mutableHTTPRequestHeaders setValue:value forKey:field];
     });
